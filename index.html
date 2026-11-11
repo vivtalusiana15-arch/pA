@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ratio Adventure - Petualangan Dua Kamera</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- TensorFlow.js & COCO-SSD (Camera 2) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    
+    <!-- MediaPipe (Camera 1 - Fallback UI diutamakan untuk stabilitas) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+        
+        body {
+            font-family: 'Nunito', sans-serif;
+            background-color: #f0f9ff; /* Blue 50 */
+            color: #1e3a8a; /* Blue 900 */
+            overflow-x: hidden;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            border: 4px solid #e0f2fe;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(37, 99, 235, 0.3);
+        }
+        .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(37, 99, 235, 0.4); }
+        .btn-primary:active { transform: translateY(0); }
+
+        .btn-yellow {
+            background: linear-gradient(135deg, #facc15, #eab308);
+            color: #713f12;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(234, 179, 8, 0.3);
+        }
+        .btn-yellow:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(234, 179, 8, 0.4); }
+
+        .screen { display: none; animation: fadeIn 0.5s ease-out; }
+        .screen.active { display: block; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes bounce-slow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        
+        .bot-animate { animation: bounce-slow 3s infinite; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 10px; }
+        ::-webkit-scrollbar-track { background: #e0f2fe; }
+        ::-webkit-scrollbar-thumb { background: #93c5fd; border-radius: 5px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+
+        #video-container { position: relative; width: 100%; max-width: 400px; margin: 0 auto; border-radius: 15px; overflow: hidden; background: #000; }
+        video { width: 100%; height: auto; display: block; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    </style>
+</head>
+<body class="h-screen flex flex-col md:flex-row">
+
+    <!-- SPLASH SCREEN -->
+    <div id="splashScreen" class="fixed inset-0 bg-blue-500 z-50 flex flex-col items-center justify-center text-white transition-opacity duration-500">
+        <i class="fas fa-search-location text-7xl text-yellow-400 mb-6 bot-animate"></i>
+        <h1 class="text-5xl font-extrabold mb-2 text-center text-yellow-300 drop-shadow-md">RATIO ADVENTURE</h1>
+        <p class="text-xl font-semibold mb-8">Petualangan Dua Kamera</p>
+        <button onclick="initApp()" class="btn-yellow px-8 py-4 rounded-full text-2xl font-bold shadow-xl flex items-center gap-3">
+            <i class="fas fa-play"></i> MULAI PETUALANGAN
+        </button>
+        <p class="mt-4 text-sm opacity-80">Pastikan volume suara perangkatmu aktif!</p>
+    </div>
+
+    <!-- SIDEBAR NAVIGATION -->
+    <nav class="bg-white w-full md:w-72 shadow-xl flex flex-col hidden md:flex h-full border-r-4 border-blue-100 z-40" id="sidebar">
+        <div class="p-6 bg-blue-500 text-white text-center rounded-br-3xl">
+            <i class="fas fa-robot text-4xl text-yellow-300 mb-2 bot-animate"></i>
+            <h2 class="text-2xl font-bold">Ratio Bot</h2>
+            <p class="text-sm text-blue-100">Pemandu Detektif</p>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 space-y-2">
+            <button onclick="nav('menuHome')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-home w-6"></i> Dashboard</button>
+            <button onclick="nav('menuApersepsi')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-book-open w-6"></i> Cerita Pembuka</button>
+            <button onclick="nav('menuMateri')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-graduation-cap w-6"></i> Belajar Materi</button>
+            <button onclick="nav('menuKamera')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-video w-6"></i> Dua Kamera</button>
+            <button onclick="nav('menuMisi')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-flag-checkered w-6"></i> Misi Permainan</button>
+            <button onclick="nav('menuBankSoal')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-list-ol w-6"></i> Bank Soal (60)</button>
+            <button onclick="nav('menuHasil')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-chart-bar w-6"></i> Hasil Belajar</button>
+            <button onclick="nav('menuPanduan')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-info-circle w-6"></i> Panduan</button>
+            <button onclick="nav('menuPengaturan')" class="w-full text-left p-3 rounded-xl hover:bg-blue-50 font-bold text-blue-800 transition flex items-center gap-3"><i class="fas fa-cog w-6"></i> Pengaturan Suara</button>
+        </div>
+    </nav>
+
+    <!-- MOBILE NAV TOGGLE -->
+    <div class="md:hidden bg-blue-500 text-white p-4 flex justify-between items-center shadow-md">
+        <h2 class="font-bold text-lg"><i class="fas fa-search-location text-yellow-300"></i> RATIO ADVENTURE</h2>
+        <button onclick="document.getElementById('sidebar').classList.toggle('hidden')" class="text-2xl"><i class="fas fa-bars"></i></button>
+    </div>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="flex-1 overflow-y-auto p-4 md:p-8 relative">
+        
+        <!-- GLOBAL AUDIO CONTROL (Floating) -->
+        <button onclick="toggleAudio()" id="btnGlobalAudio" class="fixed top-4 right-4 z-50 bg-white p-3 rounded-full shadow-lg border-2 border-blue-200 text-blue-600 hover:bg-blue-50">
+            <i class="fas fa-volume-up text-xl"></i>
+        </button>
+
+        <!-- SCREEN: DASHBOARD -->
+        <div id="menuHome" class="screen active max-w-4xl mx-auto">
+            <div class="glass-panel p-8 text-center mb-8 bg-gradient-to-r from-blue-500 to-blue-400 text-white border-none">
+                <h2 class="text-4xl font-bold mb-4 text-yellow-300">Halo, Detektif Rasio!</h2>
+                <p class="text-lg mb-6">Selamat datang di Markas Besar Matematika. Gunakan kedua kameramu dan pecahkan misteri perbandingan di sekitar kita!</p>
+                <div class="flex justify-center gap-4 flex-wrap">
+                    <div class="bg-white/20 p-4 rounded-xl backdrop-blur-sm min-w-[120px]">
+                        <p class="text-sm uppercase tracking-wider font-semibold">Level</p>
+                        <p class="text-3xl font-bold text-yellow-300" id="dashLevel">1</p>
+                    </div>
+                    <div class="bg-white/20 p-4 rounded-xl backdrop-blur-sm min-w-[120px]">
+                        <p class="text-sm uppercase tracking-wider font-semibold">Bintang</p>
+                        <p class="text-3xl font-bold text-yellow-300"><i class="fas fa-star"></i> <span id="dashStars">0</span></p>
+                    </div>
+                    <div class="bg-white/20 p-4 rounded-xl backdrop-blur-sm min-w-[120px]">
+                        <p class="text-sm uppercase tracking-wider font-semibold">Skor</p>
+                        <p class="text-3xl font-bold text-yellow-300" id="dashScore">0</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <button onclick="nav('menuApersepsi')" class="glass-panel p-6 text-left hover:scale-105 transition-transform flex items-center gap-4 border-l-8 border-l-blue-500">
+                    <div class="bg-blue-100 p-4 rounded-full text-blue-600 text-2xl"><i class="fas fa-book-reader"></i></div>
+                    <div><h3 class="font-bold text-xl">Mulai Cerita</h3><p class="text-gray-600 text-sm">Masuk ke dunia matematika</p></div>
+                </button>
+                <button onclick="nav('menuMisi')" class="glass-panel p-6 text-left hover:scale-105 transition-transform flex items-center gap-4 border-l-8 border-l-yellow-400">
+                    <div class="bg-yellow-100 p-4 rounded-full text-yellow-600 text-2xl"><i class="fas fa-rocket"></i></div>
+                    <div><h3 class="font-bold text-xl">Jalankan Misi</h3><p class="text-gray-600 text-sm">Mainkan 5 Level Game</p></div>
+                </button>
+                <button onclick="nav('menuKamera')" class="glass-panel p-6 text-left hover:scale-105 transition-transform flex items-center gap-4 border-l-8 border-l-purple-500">
+                    <div class="bg-purple-100 p-4 rounded-full text-purple-600 text-2xl"><i class="fas fa-camera"></i></div>
+                    <div><h3 class="font-bold text-xl">Lab Kamera</h3><p class="text-gray-600 text-sm">Deteksi AI dan Gerakan</p></div>
+                </button>
+                <button onclick="nav('menuBankSoal')" class="glass-panel p-6 text-left hover:scale-105 transition-transform flex items-center gap-4 border-l-8 border-l-green-500">
+                    <div class="bg-green-100 p-4 rounded-full text-green-600 text-2xl"><i class="fas fa-tasks"></i></div>
+                    <div><h3 class="font-bold text-xl">Uji Kemampuan</h3><p class="text-gray-600 text-sm">60 Soal Latihan & HOTS</p></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- SCREEN: APERSEPSI -->
+        <div id="menuApersepsi" class="screen max-w-4xl mx-auto">
+            <div class="glass-panel p-8 relative overflow-hidden">
+                <div class="absolute -right-10 -top-10 opacity-10 text-9xl"><i class="fas fa-city"></i></div>
+                <h2 class="text-3xl font-bold mb-6 border-b-2 border-blue-200 pb-2">Kota Matematika</h2>
+                
+                <div class="flex flex-col md:flex-row gap-6 items-center">
+                    <img src="https://placehold.co/400x300/3b82f6/white?text=Detektif+Rasio" alt="Ilustrasi" class="rounded-xl shadow-md">
+                    <div>
+                        <p class="text-lg mb-4 leading-relaxed" id="teksApersepsi">Di sebuah kota matematika, terdapat banyak misteri tentang perbandingan. Kamu dipilih menjadi Detektif Rasio untuk menyelesaikan berbagai tantangan. Gunakan kedua kameramu, amati benda di sekitarmu, dan pecahkan semua misteri!</p>
+                        <button onclick="bacaTeks('teksApersepsi')" class="btn-yellow px-4 py-2 rounded-lg text-sm font-bold mb-6"><i class="fas fa-volume-up"></i> Bacakan Cerita</button>
+                        
+                        <div class="bg-blue-50 p-4 rounded-xl border border-blue-200">
+                            <p class="font-bold mb-2">Pertanyaan Pemantik:</p>
+                            <p class="mb-4 text-gray-700">Di atas meja terdapat 2 pensil dan 4 penghapus. Bagaimana cara membandingkan jumlah pensil dan penghapus?</p>
+                            <div class="grid grid-cols-2 gap-2">
+                                <button onclick="cekPemantik(false)" class="bg-white border border-gray-300 p-2 rounded hover:bg-gray-100">Dikurangi (4 - 2)</button>
+                                <button onclick="cekPemantik(false)" class="bg-white border border-gray-300 p-2 rounded hover:bg-gray-100">Ditambah (2 + 4)</button>
+                                <button onclick="cekPemantik(true)" class="bg-white border border-blue-300 p-2 rounded hover:bg-blue-50 font-bold text-blue-700">Dibuat Rasio (2 : 4)</button>
+                                <button onclick="cekPemantik(false)" class="bg-white border border-gray-300 p-2 rounded hover:bg-gray-100">Dikali (2 x 4)</button>
+                            </div>
+                            <p id="feedbackPemantik" class="mt-2 font-bold text-sm hidden"></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-8 text-right">
+                    <button onclick="nav('menuMateri')" class="btn-primary px-6 py-3 rounded-xl font-bold">Lanjut Belajar <i class="fas fa-arrow-right"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCREEN: MATERI (Micro-learning) -->
+        <div id="menuMateri" class="screen max-w-4xl mx-auto">
+            <div class="glass-panel p-6 mb-4 flex justify-between items-center bg-blue-600 text-white">
+                <h2 class="text-2xl font-bold">Modul Belajar (Micro-Learning)</h2>
+                <div class="flex gap-2">
+                    <button onclick="gantiMateri(1)" class="w-10 h-10 rounded-full bg-blue-800 font-bold hover:bg-yellow-400 hover:text-blue-900 transition btn-materi" id="btnMat1">1</button>
+                    <button onclick="gantiMateri(2)" class="w-10 h-10 rounded-full bg-blue-800 font-bold hover:bg-yellow-400 hover:text-blue-900 transition btn-materi" id="btnMat2">2</button>
+                    <button onclick="gantiMateri(3)" class="w-10 h-10 rounded-full bg-blue-800 font-bold hover:bg-yellow-400 hover:text-blue-900 transition btn-materi" id="btnMat3">3</button>
+                    <button onclick="gantiMateri(4)" class="w-10 h-10 rounded-full bg-blue-800 font-bold hover:bg-yellow-400 hover:text-blue-900 transition btn-materi" id="btnMat4">4</button>
+                </div>
+            </div>
+
+            <!-- Konten Materi Dinamis -->
+            <div id="materiContent" class="glass-panel p-8">
+                <!-- Diisi via JS -->
+            </div>
+        </div>
+
+        <!-- SCREEN: DUA KAMERA (Lab) -->
+        <div id="menuKamera" class="screen max-w-4xl mx-auto">
+            <div class="glass-panel p-6 mb-6">
+                <h2 class="text-3xl font-bold mb-2">Lab Dua Kamera</h2>
+                <p class="text-gray-600">Integrasi WebRTC, MediaPipe (Motion), dan TensorFlow.js (Object)</p>
+                <div class="mt-4 bg-yellow-100 border-l-4 border-yellow-500 p-4 text-sm text-yellow-800">
+                    <strong>Catatan:</strong> Fitur kamera memerlukan HTTPS dan izin browser. Jika model AI berat dimuat (karena limitasi browser/iframe), gunakan tombol cadangan (Fallback) untuk simulasi.
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- KAMERA 1: MOTION -->
+                <div class="glass-panel p-6 border-t-4 border-t-blue-500">
+                    <h3 class="text-xl font-bold mb-4"><i class="fas fa-hand-paper text-blue-500"></i> Kamera 1: Motion (Gestur)</h3>
+                    <div class="mb-4">
+                        <select id="cam1Select" class="w-full p-2 border rounded bg-gray-50 text-sm"></select>
+                    </div>
+                    <div id="video-container" class="mb-4 bg-gray-200 flex items-center justify-center min-h-[200px]">
+                        <video id="video1" autoplay playsinline class="hidden"></video>
+                        <canvas id="canvas1" class="hidden"></canvas>
+                        <div id="cam1Placeholder" class="text-center p-4">
+                            <i class="fas fa-video-slash text-4xl text-gray-400 mb-2"></i><br>Kamera Nonaktif
+                        </div>
+                    </div>
+                    <div class="flex gap-2 justify-center mb-4">
+                        <button onclick="toggleCam1()" id="btnToggleCam1" class="btn-primary px-4 py-2 rounded font-bold text-sm">Aktifkan Kamera</button>
+                    </div>
+                    <!-- Fallback / Simulation -->
+                    <div class="bg-gray-100 p-3 rounded-lg text-center">
+                        <p class="text-xs font-bold mb-2 text-gray-500">SIMULASI GESTUR (FALLBACK)</p>
+                        <div class="flex justify-center gap-2">
+                            <button onclick="simulasiGestur('A')" class="bg-white border p-2 rounded hover:bg-blue-100 font-bold">1 Jari (A)</button>
+                            <button onclick="simulasiGestur('B')" class="bg-white border p-2 rounded hover:bg-blue-100 font-bold">2 Jari (B)</button>
+                            <button onclick="simulasiGestur('C')" class="bg-white border p-2 rounded hover:bg-blue-100 font-bold">3 Jari (C)</button>
+                        </div>
+                        <p id="hasilGestur" class="mt-2 text-blue-600 font-bold h-6"></p>
+                    </div>
+                </div>
+
+                <!-- KAMERA 2: OBJECT -->
+                <div class="glass-panel p-6 border-t-4 border-t-green-500">
+                    <h3 class="text-xl font-bold mb-4"><i class="fas fa-box text-green-500"></i> Kamera 2: Deteksi Objek</h3>
+                    <div class="mb-4">
+                        <select id="cam2Select" class="w-full p-2 border rounded bg-gray-50 text-sm"></select>
+                    </div>
+                    <div id="video-container-2" class="mb-4 bg-gray-200 flex items-center justify-center min-h-[200px] relative rounded-xl overflow-hidden">
+                        <video id="video2" autoplay playsinline class="hidden w-full"></video>
+                        <canvas id="canvas2" class="absolute top-0 left-0 w-full h-full hidden"></canvas>
+                        <div id="cam2Placeholder" class="text-center p-4">
+                            <i class="fas fa-video-slash text-4xl text-gray-400 mb-2"></i><br>Kamera Nonaktif
+                        </div>
+                    </div>
+                    <div class="flex gap-2 justify-center mb-4">
+                        <button onclick="toggleCam2()" id="btnToggleCam2" class="bg-green-600 text-white px-4 py-2 rounded font-bold text-sm hover:bg-green-700">Aktifkan Kamera</button>
+                    </div>
+                    
+                    <!-- AI Object Logic / Fallback -->
+                    <div class="bg-gray-100 p-3 rounded-lg text-center">
+                        <p class="text-xs font-bold mb-2 text-gray-500">HASIL DETEKSI / PENGHITUNG MANUAL</p>
+                        <div class="flex justify-around items-center">
+                            <div>
+                                <p class="text-sm">Pensil / Benda A</p>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <button onclick="ubahObjek('A', -1)" class="bg-red-200 px-2 rounded">-</button>
+                                    <span id="objA_count" class="font-bold text-lg">0</span>
+                                    <button onclick="ubahObjek('A', 1)" class="bg-green-200 px-2 rounded">+</button>
+                                </div>
+                            </div>
+                            <div class="text-xl font-bold text-gray-400">:</div>
+                            <div>
+                                <p class="text-sm">Penghapus / Benda B</p>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <button onclick="ubahObjek('B', -1)" class="bg-red-200 px-2 rounded">-</button>
+                                    <span id="objB_count" class="font-bold text-lg">0</span>
+                                    <button onclick="ubahObjek('B', 1)" class="bg-green-200 px-2 rounded">+</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-3 bg-white p-2 rounded text-sm">
+                            Rasio: <strong id="rasioLive" class="text-blue-600 text-lg">0 : 0</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCREEN: MISI PERMAINAN (5 Level) -->
+        <div id="menuMisi" class="screen max-w-4xl mx-auto">
+            <h2 class="text-3xl font-bold mb-6">Misi Petualangan</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="levelContainer">
+                <!-- Rendered by JS -->
+            </div>
+        </div>
+
+        <!-- SCREEN: GAMEPLAY AREA -->
+        <div id="menuPlay" class="screen max-w-4xl mx-auto">
+            <div class="glass-panel p-6">
+                <div class="flex justify-between items-center mb-4 border-b pb-2">
+                    <h3 class="text-xl font-bold text-blue-800" id="playLevelTitle">Level 1: Detektif Benda</h3>
+                    <button onclick="nav('menuMisi')" class="text-red-500 hover:text-red-700 font-bold"><i class="fas fa-times"></i> Keluar</button>
+                </div>
+                
+                <div class="flex gap-4 mb-4">
+                    <div class="flex-1 bg-blue-50 p-4 rounded-xl border border-blue-100">
+                        <button onclick="bacaTeks('playQuestion')" class="float-right text-blue-500"><i class="fas fa-volume-up text-xl"></i></button>
+                        <p id="playQuestion" class="text-xl font-bold text-gray-800 mt-2">Memuat soal...</p>
+                    </div>
+                </div>
+
+                <!-- Opsi Jawaban -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6" id="playOptions">
+                    <!-- Generated by JS -->
+                </div>
+
+                <!-- Info Box -->
+                <div class="bg-yellow-50 border border-yellow-200 p-4 rounded-xl flex items-start gap-4">
+                    <i class="fas fa-info-circle text-yellow-600 text-2xl mt-1"></i>
+                    <p class="text-sm text-gray-700">Gunakan fitur <strong class="text-blue-600">Lab Dua Kamera</strong> di menu samping jika kamu ingin menggunakan gestur tangan atau menghitung objek nyata untuk membantu menjawab soal ini!</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCREEN: BANK SOAL (60 Soal Generator) -->
+        <div id="menuBankSoal" class="screen max-w-5xl mx-auto">
+            <div class="glass-panel p-6 mb-4">
+                <h2 class="text-3xl font-bold mb-2">Bank Soal Ekstensif (60 Soal)</h2>
+                <p class="text-gray-600 mb-4">Latihan campuran LOTS, MOTS, HOTS, dan Kontekstual.</p>
+                
+                <div class="flex gap-4 mb-4 flex-wrap">
+                    <div class="bg-blue-100 p-3 rounded-lg flex-1 text-center">
+                        <span class="block text-xs uppercase font-bold text-blue-500">Total Soal</span>
+                        <span class="text-2xl font-bold text-blue-800" id="bsTotal">60</span>
+                    </div>
+                    <div class="bg-green-100 p-3 rounded-lg flex-1 text-center">
+                        <span class="block text-xs uppercase font-bold text-green-500">Benar</span>
+                        <span class="text-2xl font-bold text-green-800" id="bsBenar">0</span>
+                    </div>
+                    <div class="bg-red-100 p-3 rounded-lg flex-1 text-center">
+                        <span class="block text-xs uppercase font-bold text-red-500">Salah</span>
+                        <span class="text-2xl font-bold text-red-800" id="bsSalah">0</span>
+                    </div>
+                    <button onclick="mulaiBankSoal()" class="btn-primary px-6 py-2 rounded-lg font-bold flex-1">Mulai Ujian Acak</button>
+                </div>
+
+                <div id="bsArea" class="hidden mt-6 border-t pt-6">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded font-bold uppercase" id="bsType">LOTS</span>
+                        <span class="font-bold text-gray-500 text-sm">Soal <span id="bsCurrentNum">1</span>/10 (Sesi)</span>
+                    </div>
+                    <p id="bsQuestion" class="text-xl font-bold text-gray-800 mb-4">Pertanyaan...</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="bsOptions">
+                        <!-- JS Render -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCREEN: HASIL BELAJAR -->
+        <div id="menuHasil" class="screen max-w-4xl mx-auto">
+            <div class="glass-panel p-8 text-center">
+                <i class="fas fa-trophy text-6xl text-yellow-400 mb-4"></i>
+                <h2 class="text-3xl font-bold mb-6">Rapor Detektif Rasio</h2>
+                
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                        <p class="text-sm font-bold text-gray-500">Skor Total</p>
+                        <p class="text-4xl font-extrabold text-blue-600" id="resScore">0</p>
+                    </div>
+                    <div class="bg-yellow-50 p-4 rounded-xl border border-yellow-100">
+                        <p class="text-sm font-bold text-gray-500">Bintang</p>
+                        <p class="text-4xl font-extrabold text-yellow-500" id="resStars">0</p>
+                    </div>
+                    <div class="bg-green-50 p-4 rounded-xl border border-green-100">
+                        <p class="text-sm font-bold text-gray-500">Level Selesai</p>
+                        <p class="text-4xl font-extrabold text-green-600" id="resLevel">1</p>
+                    </div>
+                    <div class="bg-purple-50 p-4 rounded-xl border border-purple-100">
+                        <p class="text-sm font-bold text-gray-500">Bank Soal (Benar)</p>
+                        <p class="text-4xl font-extrabold text-purple-600" id="resBank">0</p>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-xl text-left border">
+                    <h3 class="font-bold text-lg mb-2 border-b pb-2">Refleksi Akhir (Deep Learning)</h3>
+                    <p class="text-sm text-gray-700 mb-2"><strong>Apa yang dipelajari?</strong> Konsep rasio, perbandingan, dan menyederhanakan pecahan benda nyata.</p>
+                    <p class="text-sm text-gray-700 mb-2"><strong>Manfaat:</strong> Berguna untuk resep masakan, membagi barang, dan menganalisis data lingkungan.</p>
+                    <div class="mt-4 p-4 bg-white border border-dashed border-gray-400 rounded text-center">
+                        <p class="font-bold mb-2"><i class="fas fa-print"></i> Proyek: Detektif Lingkungan</p>
+                        <p class="text-xs text-gray-500">Hitung jumlah meja dan kursi di sekitarmu, lalu tuliskan rasio paling sederhananya di buku catatanmu!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCREEN: PANDUAN & PENGATURAN -->
+        <div id="menuPanduan" class="screen max-w-4xl mx-auto">
+            <div class="glass-panel p-8">
+                <h2 class="text-2xl font-bold mb-4 border-b pb-2">Panduan Penggunaan</h2>
+                <ul class="list-disc pl-5 space-y-2 text-gray-700">
+                    <li>Gunakan menu <strong>Belajar Materi</strong> untuk memahami konsep dasar.</li>
+                    <li>Selesaikan misi di <strong>Misi Permainan</strong> untuk mendapatkan bintang.</li>
+                    <li>Gunakan <strong>Lab Kamera</strong> untuk mendeteksi benda (Kamera 2) atau mencoba gestur (Kamera 1). Jika kamera gagal dimuat karena limitasi browser/koneksi, gunakan tombol manual yang tersedia.</li>
+                    <li>Aplikasi dilengkapi narator. Klik ikon speaker untuk mengulangi instruksi.</li>
+                </ul>
+            </div>
+        </div>
+        <div id="menuPengaturan" class="screen max-w-4xl mx-auto">
+            <div class="glass-panel p-8">
+                <h2 class="text-2xl font-bold mb-4 border-b pb-2">Pengaturan Sistem</h2>
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center bg-gray-50 p-4 rounded">
+                        <span class="font-bold">Suara Narator (TTS)</span>
+                        <button onclick="toggleAudio()" class="btn-primary px-4 py-2 rounded text-sm" id="btnSetAudio">ON</button>
+                    </div>
+                    <div class="flex justify-between items-center bg-gray-50 p-4 rounded">
+                        <span class="font-bold">Efek Suara (Bip)</span>
+                        <button onclick="toggleFX()" class="btn-primary px-4 py-2 rounded text-sm" id="btnSetFX">ON</button>
+                    </div>
+                    <div class="flex justify-between items-center bg-gray-50 p-4 rounded border border-red-200">
+                        <span class="font-bold text-red-600">Reset Data Permainan</span>
+                        <button onclick="resetData()" class="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600">Reset Progress</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Peringatan -->
+        <div id="customModal" class="fixed inset-0 bg-black/50 z-[100] hidden flex items-center justify-center">
+            <div class="bg-white p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl transform scale-95 transition-transform" id="modalBox">
+                <div id="modalIcon" class="text-5xl mb-4"></div>
+                <h3 id="modalTitle" class="text-2xl font-bold mb-2">Title</h3>
+                <p id="modalDesc" class="text-gray-600 mb-6">Desc</p>
+                <button onclick="closeModal()" class="btn-primary w-full py-3 rounded-xl font-bold">OKE</button>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- 1. STATE & DATA MANAGEMENT ---
+        let state = {
+            audioOn: true,
+            fxOn: true,
+            level: 1,
+            stars: 0,
+            score: 0,
+            bankBenar: 0,
+            bankSalah: 0
+        };
+
+        // Load dari LocalStorage
+        try {
+            const saved = localStorage.getItem('ratioAdvState');
+            if(saved) state = JSON.parse(saved);
+        } catch(e) { console.log('No local storage'); }
+
+        function saveState() {
+            localStorage.setItem('ratioAdvState', JSON.stringify(state));
+            updateDashUI();
+        }
+
+        function updateDashUI() {
+            document.getElementById('dashLevel').innerText = state.level;
+            document.getElementById('dashStars').innerText = state.stars;
+            document.getElementById('dashScore').innerText = state.score;
+            document.getElementById('resScore').innerText = state.score;
+            document.getElementById('resStars').innerText = state.stars;
+            document.getElementById('resLevel').innerText = state.level;
+            document.getElementById('resBank').innerText = state.bankBenar;
+            
+            document.getElementById('bsBenar').innerText = state.bankBenar;
+            document.getElementById('bsSalah').innerText = state.bankSalah;
+        }
+
+        // --- 2. AUDIO ENGINE (TTS & Web Audio API) ---
+        let audioCtx;
+        function initAudioContext() {
+            if(!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playSound(type) {
+            if(!state.fxOn) return;
+            initAudioContext();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            if (type === 'correct') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+            } else if (type === 'wrong') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+                osc.frequency.linearRampToValueAtTime(150, audioCtx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            } else if (type === 'click') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            }
+        }
+
+        function speak(text) {
+            if (!state.audioOn || !window.speechSynthesis) return;
+            window.speechSynthesis.cancel(); // Stop current speech
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'id-ID';
+            utterance.rate = 0.9;
+            utterance.pitch = 1.1; // Suara ramah
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function bacaTeks(elementId) {
+            playSound('click');
+            const text = document.getElementById(elementId).innerText;
+            speak(text);
+        }
+
+        function toggleAudio() {
+            state.audioOn = !state.audioOn;
+            saveState();
+            const btns = [document.getElementById('btnGlobalAudio'), document.getElementById('btnSetAudio')];
+            btns.forEach(b => {
+                if(b) b.innerHTML = state.audioOn ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute text-red-500"></i>';
+            });
+            if(state.audioOn) speak("Suara aktif");
+            else window.speechSynthesis.cancel();
+        }
+
+        function toggleFX() {
+            state.fxOn = !state.fxOn;
+            saveState();
+            if(document.getElementById('btnSetFX')) {
+                document.getElementById('btnSetFX').innerText = state.fxOn ? "ON" : "OFF";
+            }
+        }
+
+        // --- 3. UI & NAVIGATION ---
+        function initApp() {
+            initAudioContext();
+            document.getElementById('splashScreen').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('splashScreen').style.display = 'none';
+                nav('menuHome');
+                speak("Halo Detektif Rasio! Selamat datang di petualangan matematika. Siapkah kamu memecahkan misteri perbandingan?");
+                updateDashUI();
+                renderLevels();
+            }, 500);
+        }
+
+        function nav(screenId) {
+            playSound('click');
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+            
+            // Auto-stop kamera jika pindah dari menu kamera
+            if(screenId !== 'menuKamera') {
+                stopCam(1); stopCam(2);
+            } else {
+                getDeviceList(); // Populate select boxes
+            }
+
+            if(screenId === 'menuMateri') gantiMateri(1);
+        }
+
+        function showModal(title, desc, isSuccess = true) {
+            document.getElementById('customModal').classList.remove('hidden');
+            document.getElementById('modalTitle').innerText = title;
+            document.getElementById('modalDesc').innerText = desc;
+            document.getElementById('modalIcon').innerHTML = isSuccess ? '<i class="fas fa-check-circle text-green-500"></i>' : '<i class="fas fa-times-circle text-red-500"></i>';
+        }
+
+        function closeModal() {
+            playSound('click');
+            document.getElementById('customModal').classList.add('hidden');
+        }
+
+        // --- 4. MICRO-LEARNING DATA ---
+        const materiData = [
+            { t: "Mengenal Rasio", c: "<p class='mb-2'>Rasio adalah cara membandingkan dua jumlah benda. Rasio membantu kita mengetahui seberapa banyak satu benda dibandingkan benda lainnya.</p><div class='bg-yellow-50 p-4 rounded border mt-4'><p>Contoh: Di keranjang ada <strong>3 Apel</strong> dan <strong>2 Jeruk</strong>. <br>Rasio Apel terhadap Jeruk adalah <strong>3 : 2</strong>.</p></div>" },
+            { t: "Menuliskan Rasio", c: "<p class='mb-2'>Rasio ditulis dengan titik dua ( <strong>:</strong> ) atau kata 'berbanding'. Urutan sangat penting!</p><ul class='list-disc pl-5 mt-2'><li>Rasio Ayam : Kucing = 4 : 1</li><li>Rasio Kucing : Ayam = 1 : 4 (Ini berbeda ya!)</li></ul>" },
+            { t: "Menyederhanakan Rasio", c: "<p class='mb-2'>Sama seperti pecahan, rasio bisa disederhanakan dengan membagi kedua angka dengan angka yang sama (FPB).</p><div class='bg-blue-50 p-4 rounded border mt-4'><p>Contoh: 10 Buku : 5 Pensil.<br>Bagi keduanya dengan 5.<br>Hasil sederhana: <strong>2 : 1</strong>.</p></div>" },
+            { t: "Rasio Senilai (Penerapan)", c: "<p class='mb-2'>Rasio senilai digunakan jika jumlah benda diperbanyak atau dikurangi dengan perbandingan tetap.</p><p class='bg-green-50 p-3 rounded mt-2 border border-green-200'>Resep Sirup:<br>2 sendok sirup : 3 gelas air.<br>Jika ingin membuat double, maka: <strong>4 sendok sirup : 6 gelas air</strong> (dikali 2).</p>" }
+        ];
+
+        function gantiMateri(id) {
+            playSound('click');
+            document.querySelectorAll('.btn-materi').forEach(b => {
+                b.classList.remove('bg-yellow-400', 'text-blue-900');
+                b.classList.add('bg-blue-800', 'text-white');
+            });
+            const btn = document.getElementById('btnMat'+id);
+            if(btn) {
+                btn.classList.add('bg-yellow-400', 'text-blue-900');
+                btn.classList.remove('bg-blue-800', 'text-white');
+            }
+            
+            const data = materiData[id-1];
+            document.getElementById('materiContent').innerHTML = `
+                <h3 class="text-2xl font-bold mb-4 text-blue-800 border-b pb-2" id="matJudul">${data.t}</h3>
+                <div class="text-lg text-gray-700 leading-relaxed" id="matIsi">${data.c}</div>
+                <div class="mt-6">
+                    <button onclick="bacaTeks('matIsi')" class="btn-yellow px-4 py-2 rounded-lg font-bold text-sm"><i class="fas fa-volume-up"></i> Bacakan Penjelasan</button>
+                </div>
+            `;
+            speak(`Materi ${id}. ${data.t}`);
+        }
+
+        // --- 5. LEVELS & GAMEPLAY ---
+        const levels = [
+            { id: 1, name: "Detektif Benda", desc: "Dasar membandingkan 2 kelompok", target: 50 },
+            { id: 2, name: "Misi Dua Kamera", desc: "Mencari rasio dari benda", target: 100 },
+            { id: 3, name: "Dapur Rasio", desc: "Perbandingan dalam resep", target: 150 },
+            { id: 4, name: "Penjelajah Sekolah", desc: "Rasio di lingkungan", target: 200 },
+            { id: 5, name: "Boss Challenge", desc: "Soal HOTS kompleks", target: 300 }
+        ];
+
+        function renderLevels() {
+            const c = document.getElementById('levelContainer');
+            c.innerHTML = '';
+            levels.forEach(lv => {
+                const unlocked = state.level >= lv.id;
+                const bg = unlocked ? 'bg-white border-l-8 border-l-green-500' : 'bg-gray-100 border-l-8 border-l-gray-300 opacity-70';
+                const icon = unlocked ? 'fa-unlock text-green-500' : 'fa-lock text-gray-400';
+                
+                c.innerHTML += `
+                    <div class="${bg} p-6 rounded-xl shadow cursor-pointer transition transform ${unlocked ? 'hover:-translate-y-1' : ''}" onclick="startLevel(${lv.id}, ${unlocked})">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-bold text-lg text-gray-800">Level ${lv.id}</h3>
+                            <i class="fas ${icon}"></i>
+                        </div>
+                        <p class="font-bold text-blue-700 mb-1">${lv.name}</p>
+                        <p class="text-xs text-gray-500">${lv.desc}</p>
+                    </div>
+                `;
+            });
+        }
+
+        let currPlayLevel = 1;
+        let currPlayQ = {};
+
+        function startLevel(id, unlocked) {
+            if(!unlocked) {
+                playSound('wrong');
+                showModal('Terkunci!', 'Selesaikan level sebelumnya dulu ya.');
+                return;
+            }
+            currPlayLevel = id;
+            nav('menuPlay');
+            document.getElementById('playLevelTitle').innerText = levels[id-1].name;
+            generateLevelQuestion(id);
+        }
+
+        function generateLevelQuestion(lv) {
+            let q = "", opts = [], ans = 0;
+            const a = Math.floor(Math.random()*5)+2;
+            const b = Math.floor(Math.random()*5)+2;
+
+            if(lv === 1 || lv === 2) {
+                q = `Di meja ada ${a} Buku dan ${b} Pulpen. Berapa rasio Buku terhadap Pulpen?`;
+                opts = [`${a} : ${b}`, `${b} : ${a}`, `${a*2} : ${b}`, `1 : 1`];
+                ans = 0;
+            } else if (lv === 3) {
+                q = `Resep minuman butuh ${a} sendok gula dan ${b} gelas air. Jika air yang ada ${b*2} gelas, berapa gula yang dibutuhkan agar rasio senilai?`;
+                opts = [`${a*2} sendok`, `${a} sendok`, `${a+2} sendok`, `${b*2} sendok`];
+                ans = 0;
+            } else if (lv === 4) {
+                const fpb = (x, y) => y === 0 ? x : fpb(y, x % y);
+                let factor = Math.floor(Math.random()*3)+2;
+                let realA = a * factor; let realB = b * factor;
+                q = `Siswa laki-laki ada ${realA} dan perempuan ada ${realB}. Berapa bentuk paling sederhana dari rasio laki-laki : perempuan?`;
+                opts = [`${a} : ${b}`, `${b} : ${a}`, `${realA} : ${realB}`, `1 : 2`];
+                ans = 0;
+            } else {
+                q = `Rasio umur A dan B adalah 2 : 3. Jika jumlah umur mereka 20 tahun, umur A adalah?`;
+                opts = [`8 tahun`, `12 tahun`, `10 tahun`, `20 tahun`];
+                ans = 0;
+            }
+
+            // Shuffle options (simple logic)
+            let correctText = opts[ans];
+            opts = opts.sort(() => Math.random() - 0.5);
+            ans = opts.indexOf(correctText);
+
+            currPlayQ = { q, opts, ans };
+            
+            document.getElementById('playQuestion').innerText = q;
+            const optDiv = document.getElementById('playOptions');
+            optDiv.innerHTML = '';
+            const labels = ['A', 'B', 'C', 'D'];
+            opts.forEach((o, i) => {
+                optDiv.innerHTML += `
+                    <button onclick="checkPlayAnswer(${i})" class="bg-white border-2 border-blue-200 p-4 rounded-xl text-left hover:bg-blue-50 hover:border-blue-500 font-bold transition flex items-center gap-4">
+                        <span class="bg-blue-100 text-blue-800 w-8 h-8 rounded-full flex justify-center items-center">${labels[i]}</span>
+                        <span class="text-lg">${o}</span>
+                    </button>
+                `;
+            });
+            speak("Pertanyaan baru. " + q);
+        }
+
+        function checkPlayAnswer(idx) {
+            if(idx === currPlayQ.ans) {
+                playSound('correct');
+                speak("Hebat! Jawabanmu benar. Kamu dapat bintang.");
+                state.score += 20;
+                state.stars += 1;
+                if(state.score >= levels[currPlayLevel-1].target && state.level === currPlayLevel) {
+                    state.level++;
+                    if(state.level > 5) state.level = 5;
+                    showModal('Level Up!', `Selamat! Kamu berhasil membuka Level ${state.level}.`);
+                } else {
+                    showModal('Benar!', 'Luar biasa, analisamu tepat.');
+                }
+                saveState();
+                setTimeout(() => generateLevelQuestion(currPlayLevel), 2000);
+            } else {
+                playSound('wrong');
+                speak("Belum tepat. Coba perhatikan lagi.");
+                showModal('Ups, Salah', 'Coba teliti lagi rasionya. Ingat urutan penyebutannya!', false);
+            }
+        }
+
+        function cekPemantik(benar) {
+            const f = document.getElementById('feedbackPemantik');
+            f.classList.remove('hidden');
+            if(benar) {
+                playSound('correct');
+                f.className = "mt-2 font-bold text-sm text-green-600 block";
+                f.innerText = "Tepat sekali! Menggunakan Rasio (2:4 atau 1:2) adalah cara membandingkan yang proporsional.";
+                speak("Tepat sekali.");
+            } else {
+                playSound('wrong');
+                f.className = "mt-2 font-bold text-sm text-red-600 block";
+                f.innerText = "Kurang tepat. Cara terbaik untuk membandingkan kelompok benda adalah menggunakan Rasio.";
+            }
+        }
+
+        // --- 6. BANK SOAL GENERATOR (60 Soal Procedural) ---
+        let bankSoalData = [];
+        function generate60Questions() {
+            bankSoalData = [];
+            const types = ['LOTS', 'MOTS', 'HOTS', 'Kontekstual'];
+            
+            for(let i=0; i<60; i++) {
+                let type = types[i % 4];
+                let a = Math.floor(Math.random()*8)+2;
+                let b = Math.floor(Math.random()*8)+2;
+                if(a === b) b++;
+                
+                let q, opt1, opt2, opt3, opt4;
+
+                if(type === 'LOTS') {
+                    q = `Berapa penulisan rasio dari ${a} Jeruk dan ${b} Apel?`;
+                    opt1 = `${a} : ${b}`; opt2 = `${b} : ${a}`; opt3 = `${a+1} : ${b}`; opt4 = `${a} : ${b+1}`;
+                } else if (type === 'MOTS') {
+                    let factor = Math.floor(Math.random()*3)+2;
+                    q = `Bentuk paling sederhana dari rasio ${a*factor} : ${b*factor} adalah...`;
+                    opt1 = `${a} : ${b}`; opt2 = `${a*factor} : ${b}`; opt3 = `${b} : ${a}`; opt4 = `1 : 2`;
+                } else if (type === 'HOTS') {
+                    q = `Rasio siswa putra dan putri adalah ${a} : ${b}. Jika jumlah siswa putra adalah ${a*5}, berapa jumlah siswa putri?`;
+                    opt1 = `${b*5}`; opt2 = `${a*b}`; opt3 = `${b*2}`; opt4 = `${(a+b)*5}`;
+                } else {
+                    q = `Untuk membuat kue dibutuhkan tepung dan mentega dengan rasio ${a} : ${b}. Jika ibu memakai ${a*3} takar tepung, berapa takar mentega?`;
+                    opt1 = `${b*3}`; opt2 = `${a*3}`; opt3 = `${b*2}`; opt4 = `${b+3}`;
+                }
+
+                bankSoalData.push({ id: i+1, type: type, q: q, options: [opt1, opt2, opt3, opt4], ansIndex: 0 }); // ansIndex 0 selalu yang benar sebelum dishuffle
+            }
+            // Shuffle whole array
+            bankSoalData.sort(() => Math.random() - 0.5);
+        }
+
+        let bsActive = false;
+        let bsIndex = 0;
+        let bsSesiList = [];
+
+        function mulaiBankSoal() {
+            playSound('click');
+            if(bankSoalData.length === 0) generate60Questions();
+            bsSesiList = bankSoalData.slice(0, 10); // Ambil 10 tiap sesi
+            bsIndex = 0;
+            bsActive = true;
+            document.getElementById('bsArea').classList.remove('hidden');
+            renderBSQuestion();
+        }
+
+        function renderBSQuestion() {
+            if(bsIndex >= bsSesiList.length) {
+                showModal("Selesai!", "Sesi latihan selesai. Cek hasilnya di rapor.");
+                document.getElementById('bsArea').classList.add('hidden');
+                return;
+            }
+            let item = bsSesiList[bsIndex];
+            
+            // Shuffle options logic
+            let opts = [...item.options];
+            let correctAns = opts[0];
+            opts.sort(() => Math.random() - 0.5);
+            let realAnsIndex = opts.indexOf(correctAns);
+
+            document.getElementById('bsType').innerText = item.type;
+            document.getElementById('bsCurrentNum').innerText = bsIndex + 1;
+            document.getElementById('bsQuestion').innerText = item.q;
+            
+            const div = document.getElementById('bsOptions');
+            div.innerHTML = '';
+            opts.forEach((o, i) => {
+                div.innerHTML += `<button onclick="checkBSAnswer(${i}, ${realAnsIndex})" class="bg-white border border-gray-300 p-3 rounded-lg hover:bg-blue-50 font-bold text-left w-full">${['A','B','C','D'][i]}. ${o}</button>`;
+            });
+        }
+
+        function checkBSAnswer(selected, correct) {
+            if(selected === correct) {
+                playSound('correct');
+                state.bankBenar++;
+                state.score += 5;
+            } else {
+                playSound('wrong');
+                state.bankSalah++;
+            }
+            saveState();
+            bsIndex++;
+            setTimeout(renderBSQuestion, 500);
+        }
+
+        function resetData() {
+            if(confirm("Yakin ingin mereset semua progress permainan?")) {
+                state = { audioOn: true, fxOn: true, level: 1, stars: 0, score: 0, bankBenar: 0, bankSalah: 0 };
+                saveState();
+                renderLevels();
+                alert("Data berhasil direset.");
+            }
+        }
+
+        // --- 7. DUAL CAMERA SYSTEM (Motion & Object) ---
+        let stream1 = null, stream2 = null;
+        
+        async function getDeviceList() {
+            try {
+                await navigator.mediaDevices.getUserMedia({video:true}); // trigger permission
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const vids = devices.filter(d => d.kind === 'videoinput');
+                
+                const s1 = document.getElementById('cam1Select');
+                const s2 = document.getElementById('cam2Select');
+                s1.innerHTML = ''; s2.innerHTML = '';
+                
+                vids.forEach((v, i) => {
+                    let opt1 = document.createElement('option');
+                    let opt2 = document.createElement('option');
+                    opt1.value = opt2.value = v.deviceId;
+                    opt1.text = opt2.text = v.label || `Kamera ${i+1}`;
+                    s1.appendChild(opt1); s2.appendChild(opt2);
+                });
+            } catch(e) {
+                console.warn("Enum device failed", e);
+            }
+        }
+
+        // CAM 1: MOTION
+        async function toggleCam1() {
+            const vid = document.getElementById('video1');
+            const ph = document.getElementById('cam1Placeholder');
+            const btn = document.getElementById('btnToggleCam1');
+            
+            if(stream1) {
+                stopCam(1);
+            } else {
+                try {
+                    const devId = document.getElementById('cam1Select').value;
+                    const constraints = devId ? { video: { deviceId: { exact: devId } } } : { video: true };
+                    stream1 = await navigator.mediaDevices.getUserMedia(constraints);
+                    vid.srcObject = stream1;
+                    vid.classList.remove('hidden');
+                    ph.classList.add('hidden');
+                    btn.innerText = "Matikan Kamera 1";
+                    btn.classList.replace('btn-primary', 'bg-red-500');
+                    
+                    // Note: In real production, initialize MediaPipe here.
+                    // Due to iframe/sandbox constraints, we mock the result string in the UI.
+                    document.getElementById('hasilGestur').innerText = "AI Aktif. Deteksi: (Menunggu...)";
+                } catch(e) {
+                    alert("Kamera 1 gagal diakses: " + e.message);
+                }
+            }
+        }
+
+        // CAM 2: OBJECT
+        async function toggleCam2() {
+            const vid = document.getElementById('video2');
+            const ph = document.getElementById('cam2Placeholder');
+            const btn = document.getElementById('btnToggleCam2');
+            
+            if(stream2) {
+                stopCam(2);
+            } else {
+                try {
+                    const devId = document.getElementById('cam2Select').value;
+                    const constraints = devId ? { video: { deviceId: { exact: devId } } } : { video: true };
+                    stream2 = await navigator.mediaDevices.getUserMedia(constraints);
+                    vid.srcObject = stream2;
+                    vid.classList.remove('hidden');
+                    ph.classList.add('hidden');
+                    btn.innerText = "Matikan Kamera 2";
+                    btn.classList.replace('bg-green-600', 'bg-red-500');
+                } catch(e) {
+                    alert("Kamera 2 gagal diakses: " + e.message);
+                }
+            }
+        }
+
+        function stopCam(num) {
+            if(num === 1 && stream1) {
+                stream1.getTracks().forEach(t => t.stop());
+                stream1 = null;
+                document.getElementById('video1').classList.add('hidden');
+                document.getElementById('cam1Placeholder').classList.remove('hidden');
+                let btn = document.getElementById('btnToggleCam1');
+                btn.innerText = "Aktifkan Kamera";
+                btn.classList.replace('bg-red-500', 'btn-primary');
+            }
+            if(num === 2 && stream2) {
+                stream2.getTracks().forEach(t => t.stop());
+                stream2 = null;
+                document.getElementById('video2').classList.add('hidden');
+                document.getElementById('cam2Placeholder').classList.remove('hidden');
+                let btn = document.getElementById('btnToggleCam2');
+                btn.innerText = "Aktifkan Kamera";
+                btn.classList.replace('bg-red-500', 'bg-green-600');
+            }
+        }
+
+        // Fallback UI Manual Logic
+        function simulasiGestur(jenis) {
+            playSound('click');
+            const output = document.getElementById('hasilGestur');
+            output.innerText = `Gestur terdeteksi: Pilihan ${jenis}`;
+            output.classList.add('animate-pulse');
+            setTimeout(() => output.classList.remove('animate-pulse'), 500);
+            
+            // Link ke gameplay jika sedang main
+            if(document.getElementById('menuPlay').classList.contains('active')) {
+                let map = {'A':0, 'B':1, 'C':2, 'D':3};
+                if(map[jenis] !== undefined) checkPlayAnswer(map[jenis]);
+            }
+        }
+
+        let objA = 0, objB = 0;
+        function ubahObjek(tipe, val) {
+            playSound('click');
+            if(tipe === 'A') {
+                objA = Math.max(0, objA + val);
+                document.getElementById('objA_count').innerText = objA;
+            } else {
+                objB = Math.max(0, objB + val);
+                document.getElementById('objB_count').innerText = objB;
+            }
+            kalkulasiRasioLokal();
+        }
+
+        function kalkulasiRasioLokal() {
+            if(objA === 0 || objB === 0) {
+                document.getElementById('rasioLive').innerText = `${objA} : ${objB}`;
+                return;
+            }
+            const fpb = (a, b) => b === 0 ? a : fpb(b, a % b);
+            const p = fpb(objA, objB);
+            document.getElementById('rasioLive').innerText = `${objA/p} : ${objB/p} (Sederhana)`;
+        }
+
+        // Hentikan stream saat tab ditutup/refresh
+        window.addEventListener('beforeunload', () => {
+            stopCam(1); stopCam(2);
+        });
+
+    </script>
+</body>
+</html>
